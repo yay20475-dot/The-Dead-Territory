@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>The Dead Territory</title>
+    <style>
+        :root { --blood: #ff0000; --terminal: #00ff41; }
+        body {
+            background-color: #000;
+            color: #ccc;
+            font-family: 'Courier New', Courier, monospace;
+            margin: 0; padding: 10px;
+            display: flex; flex-direction: column;
+            align-items: center; height: 100vh;
+            box-sizing: border-box; overflow: hidden;
+        }
+
+        #header { text-align: center; margin-bottom: 5px; }
+        h1 { font-size: 1.1rem; color: var(--blood); margin: 0; letter-spacing: 2px; }
+        #status { font-size: 0.7rem; color: #888; }
+
+        #friend-box {
+            width: 100%; background: #0a0a0a; border: 1px solid #333;
+            padding: 10px; margin-bottom: 10px; min-height: 120px;
+            box-sizing: border-box;
+        }
+        #friend-label { color: #fff; font-weight: bold; font-size: 0.75rem; display: block; border-bottom: 1px solid #222; }
+        #friend-msg { color: var(--terminal); font-style: italic; font-size: 0.85rem; margin-top: 8px; display: block; line-height: 1.4; }
+
+        .grid {
+            display: grid; grid-template-columns: repeat(2, 1fr);
+            gap: 8px; width: 100%; flex-grow: 1;
+        }
+
+        .door {
+            background: #111; border: 1px solid #333;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            padding: 5px; cursor: pointer; border-radius: 4px;
+        }
+
+        .door span { font-size: 0.8rem; font-weight: bold; color: #aaa; }
+        .pop-count { font-size: 0.6rem; color: #555; margin-top: 2px; }
+
+        .door.locked { background: #200; border-color: var(--blood); }
+        .door.locked span { color: var(--blood); }
+
+        #panic-ui {
+            position: fixed; inset: 0; background: #600;
+            display: none; flex-direction: column; align-items: center;
+            justify-content: center; z-index: 1000;
+        }
+        .panic-btn {
+            background: #000; color: #fff; border: 2px solid #fff;
+            padding: 15px 30px; font-size: 1rem; font-weight: bold; margin-top: 20px;
+        }
+        .shake { animation: shake 0.1s infinite; }
+        @keyframes shake { 0%{transform:translate(2px,2px)} 50%{transform:translate(-2px,-2px)} 100%{transform:translate(1px,-1px)} }
+
+        #win-screen {
+            position: fixed; inset: 0; background: white;
+            display: none; flex-direction: column; align-items: center;
+            justify-content: center; z-index: 2000; color: black;
+            text-align: center; padding: 20px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="header">
+        <h1>The Dead Territory</h1>
+        <div id="status">SURVIVORS: <span id="score">0</span> / 7</div>
+    </div>
+
+    <div id="friend-box">
+        <span id="friend-label">FRIEND:</span>
+        <span id="friend-msg">I don't know what HIM is... but the Red is spreading.</span>
+    </div>
+
+    <div class="grid" id="grid"></div>
+
+    <!-- UI Khi chọn trúng HIM -->
+    <div id="panic-ui">
+        <h2 style="color:white; text-align:center;">HIM IS STARING AT YOU!<br>CLOSE YOUR EYES!</h2>
+        <button class="panic-btn" onclick="closeEyes()">[ CLOSE EYES ]</button>
+    </div>
+
+    <!-- Màn hình chiến thắng -->
+    <div id="win-screen">
+        <h1 style="color: gold; text-shadow: none;">VICTORY</h1>
+        <p id="win-msg" style="font-weight: bold; font-style: italic; margin: 20px 0;"></p>
+        <button onclick="location.reload()" style="padding: 10px 20px; cursor: pointer; font-weight: bold;">BACK TO DARKNESS</button>
+    </div>
+
+    <script>
+        const cityData = [
+            { name: "Tokyo", pop: "37.4M" }, { name: "Delhi", pop: "32.9M" },
+            { name: "Shanghai", pop: "28.5M" }, { name: "Sao Paulo", pop: "22.4M" },
+            { name: "Mexico City", pop: "22.1M" }, { name: "Cairo", pop: "21.7M" },
+            { name: "Dhaka", pop: "22.4M" }, { name: "Osaka", pop: "19.1M" }
+        ];
+
+        const friendLore = [
+            "HIM watched me for three years. I was living a normal life until... maybe {city} is still normal?",
+            "HIM is claiming {city}. I can hear the silence spreading through the streets. Run elsewhere.",
+            "I don't know what HIM wants. He just stands there, watching the world dead. Is {city} still alive?",
+            "The territory of HIM is expanding. Soon, there will be no more places to hide. Try {city}?",
+            "Millions died in {city}. I saw their lights go out one by one. HIM is revive. Stay away from there.",
+            "I survived HIM before, but I feel different now. Like my shadow is no longer mine. Go to {city}...",
+            "HIM doesn't make a sound. He is the static in the radio, the darkness under your bed. I think {city} is safe.",
+            "Every time you pick a city, HIM moves a little closer. Can you feel the breath on your neck? Go to {city}!",
+            "The world has changed. We have to escape from here. Maybe {city} is the exit?"
+        ];
+
+        let score = 0;
+        let lockedRooms = [];
+        let gameActive = true;
+        let panicTimer = null;
+
+        function init() {
+            const grid = document.getElementById('grid');
+            cityData.forEach((city, i) => {
+                const door = document.createElement('div');
+                door.className = 'door';
+                door.id = `door-${i}`;
+                door.innerHTML = `<span>${city.name}</span><span class="pop-count">ALIVE</span>`;
+                door.onclick = () => choose(i);
+                grid.appendChild(door);
+            });
+            updateFriendMsg();
+        }
+
+        function updateFriendMsg() {
+            let available = [];
+            cityData.forEach((_, i) => { if(!lockedRooms.includes(i)) available.push(i); });
+            
+            if (available.length > 0) {
+                let randomCityIndex = available[Math.floor(Math.random() * available.length)];
+                let randomLore = friendLore[Math.floor(Math.random() * friendLore.length)];
+                document.getElementById('friend-msg').textContent = randomLore.replace("{city}", cityData[randomCityIndex].name);
+            }
+        }
+
+        function choose(id) {
+            if (!gameActive || lockedRooms.includes(id)) return;
+
+            let available = [];
+            cityData.forEach((_, i) => { if(!lockedRooms.includes(i)) available.push(i); });
+            
+            let him = available[Math.floor(Math.random() * available.length)];
+
+            if (id === him) {
+                startPanic();
+            } else {
+                score++;
+                document.getElementById('score').textContent = score;
+                
+                let others = available.filter(i => i !== id);
+                let doomed = others[Math.floor(Math.random() * others.length)];
+                
+                lockedRooms.push(doomed);
+                const deadDoor = document.getElementById(`door-${doomed}`);
+                deadDoor.classList.add('locked');
+                deadDoor.innerHTML = `<span>VOID</span><span style="color:white; font-size:9px;">DIED: ${cityData[doomed].pop}</span>`;
+                
+                if (score >= 7) {
+                    gameActive = false;
+                    showWinScreen();
+                } else {
+                    updateFriendMsg();
+                }
+            }
+        }
+
+        function startPanic() {
+            gameActive = false;
+            document.getElementById('panic-ui').style.display = 'flex';
+            document.body.classList.add('shake');
+            document.getElementById('friend-msg').textContent = "HIM! HE IS RIGHT THERE! CLOSE YOUR EYES!";
+            
+            panicTimer = setTimeout(() => { 
+                endGame("You failed to close them. HIM is now part of you."); 
+            }, 500);
+        }
+
+        function closeEyes() {
+            clearTimeout(panicTimer);
+            if (Math.random() > 0.5) {
+                document.getElementById('panic-ui').style.display = 'none';
+                document.body.classList.remove('shake');
+                gameActive = true;
+                updateFriendMsg();
+            } else {
+                endGame("You closed your eyes, but HIM was already inside your mind.");
+            }
+        }
+
+        function showWinScreen() {
+            const winScreen = document.getElementById('win-screen');
+            const winMsg = document.getElementById('win-msg');
+            winScreen.style.display = 'flex';
+            winMsg.textContent = "Finally… Sun is rise! HIM is gone…?";
+        }
+
+        function endGame(reason) {
+            document.getElementById('panic-ui').style.backgroundColor = "black";
+            document.getElementById('panic-ui').innerHTML = `
+                <div style="text-align:center;">
+                    <h1 style="color:red; font-size: 2rem;">ERASED</h1>
+                    <p style="color:white; font-size:12px; margin: 20px;">${reason}</p>
+                    <button onclick="location.reload()" style="background:red; border:none; padding:10px 20px; color:black; font-weight:bold; cursor:pointer;">RE-ENTER</button>
+                </div>`;
+        }
+
+        init();
+    </script>
+</body>
+</html>
